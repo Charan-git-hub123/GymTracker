@@ -73,7 +73,13 @@ func main() {
 	http.HandleFunc("/workout-history", getWorkoutHistory)
 
 	fmt.Println("🚀 Server running on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	port := os.Getenv("PORT")
+
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 // -------------------- HANDLERS --------------------
