@@ -3,230 +3,94 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 )
 
 var db *sql.DB
 
-// ---------------- MODELS ----------------
-
-type MuscleGroup struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-}
-
 type Exercise struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	MuscleGroup string `json:"muscle_group"`
-	YoutubeLink string `json:"youtube_link"`
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	MuscleGroupID int    `json:"muscle_group_id"`
+	YoutubeLink   string `json:"youtube_link"`
 }
-
-type ExerciseLog struct {
-	ID           int    `json:"id"`
-	ExerciseName string `json:"exercise_name"`
-	Date         string `json:"date"`
-}
-
-// ---------------- MAIN ----------------
 
 func main() {
+	connStr := os.Getenv("DATABASE_URL")
 	var err error
-
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL not set")
-	}
-
-	db, err = sql.Open("postgres", databaseURL)
+	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = db.Ping()
-	if err != nil {
-		log.Fatal("DB connection failed:", err)
-	}
+	r := mux.NewRouter()
 
-	fmt.Println("✅ Connected to DB")
+	// CORS
+	r.Use(mux.CORSMethodMiddleware(r))
+	r.Use(corsMiddleware)
 
-	http.HandleFunc("/", homeHandler)
+	r.HandleFunc("/exercises", getExercises).Methods("GET")
+	r.HandleFunc("/exercises", createExercise).Methods("POST")
 
-	http.HandleFunc("/muscle-groups", getMuscleGroups)
-	http.HandleFunc("/add-muscle-group", addMuscleGroup)
-
-	http.HandleFunc("/exercises", getExercises)
-	http.HandleFunc("/add-exercise", addExercise)
-
-	http.HandleFunc("/workout-history", getWorkoutHistory)
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	fmt.Println("🚀 Server running on port", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Println("Server running on :8080")
+	http.ListenAndServe(":8080", r)
 }
 
-// ---------------- UI PAGE ----------------
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-	html := `
-	<!DOCTYPE html>
-	<html>
-	<head>
-		<title>Gym Tracker</title>
-	</head>
-	<body>
+		if r.Method == "OPTIONS" {
+			return
+		}
 
-	<h1>🏋️ Gym Tracker</h1>
-
-	<h2>Add Muscle Group</h2>
-	<input id="mgName" placeholder="Muscle Group">
-	<button onclick="addMuscleGroup()">Add</button>
-
-	<h2>Add Exercise</h2>
-	<input id="exName" placeholder="Exercise Name">
-	<input id="mgID" placeholder="Muscle Group ID">
-	<input id="yt" placeholder="YouTube Link">
-	<button onclick="addExercise()">Add</button>
-
-	<h2>View Exercises</h2>
-	<button onclick="getExercises()">Load</button>
-
-	<h2>Workout History</h2>
-	<button onclick="getHistory()">Load</button>
-
-	<pre id="output"></pre>
-
-	<script>
-
-	function addMuscleGroup(){
-		fetch('/add-muscle-group', {
-			method:'POST',
-			headers:{'Content-Type':'application/json'},
-			body: JSON.stringify({name: document.getElementById('mgName').value})
-		}).then(()=>alert('Added'))
-	}
-
-	function addExercise(){
-		fetch('/add-exercise', {
-			method:'POST',
-			headers:{'Content-Type':'application/json'},
-			body: JSON.stringify({
-				name: document.getElementById('exName').value,
-				muscle_group_id: parseInt(document.getElementById('mgID').value),
-				youtube_link: document.getElementById('yt').value
-			})
-		}).then(()=>alert('Exercise Added'))
-	}
-
-	function getExercises(){
-		fetch('/exercises')
-		.then(res=>res.json())
-		.then(data=>{
-			document.getElementById('output').innerText = JSON.stringify(data,null,2)
-		})
-	}
-
-	function getHistory(){
-		fetch('/workout-history')
-		.then(res=>res.json())
-		.then(data=>{
-			document.getElementById('output').innerText = JSON.stringify(data,null,2)
-		})
-	}
-
-	</script>
-
-	</body>
-	</html>
-	`
-
-	fmt.Fprintln(w, html)
-}
-
-// ---------------- BACKEND ----------------
-
-func getMuscleGroups(w http.ResponseWriter, r *http.Request) {
-	rows, _ := db.Query("SELECT id, name FROM muscle_groups")
-	defer rows.Close()
-
-	var groups []MuscleGroup
-
-	for rows.Next() {
-		var g MuscleGroup
-		rows.Scan(&g.ID, &g.Name)
-		groups = append(groups, g)
-	}
-
-	json.NewEncoder(w).Encode(groups)
-}
-
-func addMuscleGroup(w http.ResponseWriter, r *http.Request) {
-	var input MuscleGroup
-	json.NewDecoder(r.Body).Decode(&input)
-
-	db.Exec("INSERT INTO muscle_groups(name) VALUES($1)", input.Name)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func getExercises(w http.ResponseWriter, r *http.Request) {
-	rows, _ := db.Query(`
-		SELECT e.id, e.name, m.name, COALESCE(e.youtube_link, '')
+	rows, err := db.Query(`
+		SELECT e.id, e.name, e.muscle_group_id, e.youtube_link
 		FROM exercises e
-		JOIN muscle_groups m ON e.muscle_group_id = m.id
 	`)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 	defer rows.Close()
 
-	var list []Exercise
+	var exercises []Exercise
 
 	for rows.Next() {
 		var e Exercise
-		rows.Scan(&e.ID, &e.Name, &e.MuscleGroup, &e.YoutubeLink)
-		list = append(list, e)
+		rows.Scan(&e.ID, &e.Name, &e.MuscleGroupID, &e.YoutubeLink)
+		exercises = append(exercises, e)
 	}
 
-	json.NewEncoder(w).Encode(list)
+	json.NewEncoder(w).Encode(exercises)
 }
 
-func addExercise(w http.ResponseWriter, r *http.Request) {
-	type Input struct {
-		Name          string
-		MuscleGroupID int
-		YoutubeLink   string
+func createExercise(w http.ResponseWriter, r *http.Request) {
+	var e Exercise
+	json.NewDecoder(r.Body).Decode(&e)
+
+	err := db.QueryRow(
+		`INSERT INTO exercises (name, muscle_group_id, youtube_link)
+		 VALUES ($1, $2, $3) RETURNING id`,
+		e.Name, e.MuscleGroupID, e.YoutubeLink,
+	).Scan(&e.ID)
+
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
 	}
 
-	var input Input
-	json.NewDecoder(r.Body).Decode(&input)
-
-	db.Exec(
-		"INSERT INTO exercises(name, muscle_group_id, youtube_link) VALUES($1,$2,$3)",
-		input.Name, input.MuscleGroupID, input.YoutubeLink,
-	)
-}
-
-func getWorkoutHistory(w http.ResponseWriter, r *http.Request) {
-	rows, _ := db.Query(`
-		SELECT el.id, e.name, el.workout_date
-		FROM exercise_logs el
-		JOIN exercises e ON el.exercise_id = e.id
-		ORDER BY el.workout_date DESC
-	`)
-	defer rows.Close()
-
-	var logs []ExerciseLog
-
-	for rows.Next() {
-		var l ExerciseLog
-		rows.Scan(&l.ID, &l.ExerciseName, &l.Date)
-		logs = append(logs, l)
-	}
-
-	json.NewEncoder(w).Encode(logs)
+	json.NewEncoder(w).Encode(e)
 }
