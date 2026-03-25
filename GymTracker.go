@@ -7,38 +7,39 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 )
 
 var db *sql.DB
 
-type Exercise struct {
-	ID            int    `json:"id"`
-	Name          string `json:"name"`
-	MuscleGroupID int    `json:"muscle_group_id"`
-	YoutubeLink   string `json:"youtube_link"`
+type Muscle struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 func main() {
-	connStr := os.Getenv("DATABASE_URL")
 	var err error
-	db, err = sql.Open("postgres", connStr)
+
+	db, err = sql.Open("postgres", os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	r := mux.NewRouter()
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// CORS
-	r.Use(mux.CORSMethodMiddleware(r))
-	r.Use(corsMiddleware)
+	http.HandleFunc("/muscle-groups", handleMuscles)
+	http.HandleFunc("/exercises", handleExercises)
 
-	r.HandleFunc("/exercises", getExercises).Methods("GET")
-	r.HandleFunc("/exercises", createExercise).Methods("POST")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-	log.Println("Server running on :8080")
-	http.ListenAndServe(":8080", r)
+	log.Println("Server running on", port)
+	log.Fatal(http.ListenAndServe(":"+port, corsMiddleware(http.DefaultServeMux)))
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -55,42 +56,47 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func getExercises(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`
-		SELECT e.id, e.name, e.muscle_group_id, e.youtube_link
-		FROM exercises e
-	`)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
+func handleMuscles(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		rows, _ := db.Query("SELECT id, name FROM muscle_groups")
+		defer rows.Close()
+
+		var list []Muscle
+
+		for rows.Next() {
+			var m Muscle
+			rows.Scan(&m.ID, &m.Name)
+			list = append(list, m)
+		}
+
+		json.NewEncoder(w).Encode(list)
 		return
 	}
-	defer rows.Close()
 
-	var exercises []Exercise
+	if r.Method == "POST" {
+		var m Muscle
+		json.NewDecoder(r.Body).Decode(&m)
 
-	for rows.Next() {
-		var e Exercise
-		rows.Scan(&e.ID, &e.Name, &e.MuscleGroupID, &e.YoutubeLink)
-		exercises = append(exercises, e)
+		db.Exec("INSERT INTO muscle_groups(name) VALUES($1)", m.Name)
+
+		w.Write([]byte("ok"))
 	}
-
-	json.NewEncoder(w).Encode(exercises)
 }
 
-func createExercise(w http.ResponseWriter, r *http.Request) {
-	var e Exercise
-	json.NewDecoder(r.Body).Decode(&e)
+func handleExercises(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		var data struct {
+			Name          string `json:"name"`
+			MuscleGroupID int    `json:"muscle_group_id"`
+		}
 
-	err := db.QueryRow(
-		`INSERT INTO exercises (name, muscle_group_id, youtube_link)
-		 VALUES ($1, $2, $3) RETURNING id`,
-		e.Name, e.MuscleGroupID, e.YoutubeLink,
-	).Scan(&e.ID)
+		json.NewDecoder(r.Body).Decode(&data)
 
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+		db.Exec(
+			"INSERT INTO exercises(name, muscle_group_id) VALUES($1, $2)",
+			data.Name, data.MuscleGroupID,
+		)
+
+		w.Write([]byte("ok"))
 	}
-
-	json.NewEncoder(w).Encode(e)
 }
