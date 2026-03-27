@@ -6,22 +6,23 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	_ "github.com/lib/pq"
 )
 
 var db *sql.DB
 
-// -------------------- CORS --------------------
-func enableCORS(next http.HandlerFunc) http.HandlerFunc {
+// ---------------- CORS ----------------
+func cors(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
 			return
 		}
 
@@ -29,39 +30,30 @@ func enableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// -------------------- MODELS --------------------
-type MuscleGroup struct {
+// ---------------- MODELS ----------------
+type Muscle struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
 
 type Exercise struct {
-	ID            int    `json:"id"`
-	Name          string `json:"name"`
-	MuscleGroupID int    `json:"muscle_group_id"`
+	ID   int    `json:"id"`
+	Name string `json:"name"`
 }
 
 type Set struct {
-	ID        int `json:"id"`
-	ExerciseID int `json:"exercise_id"`
+	SetNumber int `json:"set_number"`
 	Weight    int `json:"weight"`
 	Reps      int `json:"reps"`
 }
 
-// -------------------- HANDLERS --------------------
+// ---------------- MUSCLES ----------------
+func getMuscles(w http.ResponseWriter, r *http.Request) {
+	rows, _ := db.Query("SELECT id, name FROM muscle_groups")
 
-// GET muscle groups
-func getMuscleGroups(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, name FROM muscle_groups")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer rows.Close()
-
-	var list []MuscleGroup
+	var list []Muscle
 	for rows.Next() {
-		var m MuscleGroup
+		var m Muscle
 		rows.Scan(&m.ID, &m.Name)
 		list = append(list, m)
 	}
@@ -69,146 +61,105 @@ func getMuscleGroups(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(list)
 }
 
-// ADD muscle group
-func addMuscleGroup(w http.ResponseWriter, r *http.Request) {
-	var m MuscleGroup
+func addMuscle(w http.ResponseWriter, r *http.Request) {
+	var m Muscle
 	json.NewDecoder(r.Body).Decode(&m)
 
-	_, err := db.Exec("INSERT INTO muscle_groups(name) VALUES($1)", m.Name)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Write([]byte("added"))
+	db.Exec("INSERT INTO muscle_groups(name) VALUES($1)", m.Name)
 }
 
-// DELETE muscle group
-func deleteMuscleGroup(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-
-	_, err := db.Exec("DELETE FROM muscle_groups WHERE id=$1", id)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Write([]byte("deleted"))
-}
-
-// GET exercises by muscle
+// ---------------- EXERCISES ----------------
 func getExercises(w http.ResponseWriter, r *http.Request) {
-	mid := r.URL.Query().Get("muscle_id")
+	id := r.URL.Query().Get("muscle_id")
 
-	rows, err := db.Query("SELECT id, name, muscle_group_id FROM exercises WHERE muscle_group_id=$1", mid)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer rows.Close()
+	rows, _ := db.Query("SELECT id, name FROM exercises WHERE muscle_group_id=$1", id)
 
 	var list []Exercise
 	for rows.Next() {
 		var e Exercise
-		rows.Scan(&e.ID, &e.Name, &e.MuscleGroupID)
+		rows.Scan(&e.ID, &e.Name)
 		list = append(list, e)
 	}
 
 	json.NewEncoder(w).Encode(list)
 }
 
-// ADD exercise
 func addExercise(w http.ResponseWriter, r *http.Request) {
-	var e Exercise
-	json.NewDecoder(r.Body).Decode(&e)
-
-	_, err := db.Exec("INSERT INTO exercises(name, muscle_group_id) VALUES($1,$2)", e.Name, e.MuscleGroupID)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
+	var input struct {
+		Name          string `json:"name"`
+		MuscleGroupID int    `json:"muscle_group_id"`
 	}
 
-	w.Write([]byte("added"))
+	json.NewDecoder(r.Body).Decode(&input)
+
+	db.Exec("INSERT INTO exercises(name, muscle_group_id) VALUES($1,$2)",
+		input.Name, input.MuscleGroupID)
 }
 
-// DELETE exercise
-func deleteExercise(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
+// ---------------- HISTORY ----------------
+func getHistory(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("exercise_id")
 
-	_, err := db.Exec("DELETE FROM exercises WHERE id=$1", id)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
+	rows, _ := db.Query(`
+		SELECT DISTINCT workout_date 
+		FROM exercise_logs 
+		WHERE exercise_id=$1
+		ORDER BY workout_date DESC
+	`, id)
 
-	w.Write([]byte("deleted"))
-}
-
-// ADD set
-func addSet(w http.ResponseWriter, r *http.Request) {
-	var s Set
-	json.NewDecoder(r.Body).Decode(&s)
-
-	_, err := db.Exec("INSERT INTO sets(exercise_id, weight, reps) VALUES($1,$2,$3)",
-		s.ExerciseID, s.Weight, s.Reps)
-
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Write([]byte("set added"))
-}
-
-// GET sets by exercise
-func getSets(w http.ResponseWriter, r *http.Request) {
-	eid := r.URL.Query().Get("exercise_id")
-
-	rows, err := db.Query("SELECT id, exercise_id, weight, reps FROM sets WHERE exercise_id=$1", eid)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer rows.Close()
-
-	var list []Set
+	var dates []string
 	for rows.Next() {
-		var s Set
-		rows.Scan(&s.ID, &s.ExerciseID, &s.Weight, &s.Reps)
-		list = append(list, s)
+		var d string
+		rows.Scan(&d)
+		dates = append(dates, d)
 	}
 
-	json.NewEncoder(w).Encode(list)
+	json.NewEncoder(w).Encode(dates)
 }
 
-// -------------------- MAIN --------------------
+// ---------------- ADD WORKOUT ----------------
+func addWorkout(w http.ResponseWriter, r *http.Request) {
+
+	var input struct {
+		ExerciseID int   `json:"exercise_id"`
+		Sets       []Set `json:"sets"`
+	}
+
+	json.NewDecoder(r.Body).Decode(&input)
+
+	tx, _ := db.Begin()
+
+	var logID int
+	tx.QueryRow(
+		"INSERT INTO exercise_logs(exercise_id, workout_date) VALUES($1,$2) RETURNING id",
+		input.ExerciseID, time.Now().Format("2006-01-02"),
+	).Scan(&logID)
+
+	for _, s := range input.Sets {
+		tx.Exec(
+			"INSERT INTO sets(exercise_log_id,set_number,weight,reps) VALUES($1,$2,$3,$4)",
+			logID, s.SetNumber, s.Weight, s.Reps,
+		)
+	}
+
+	tx.Commit()
+}
+
+// ---------------- MAIN ----------------
 func main() {
 
-	var err error
+	conn := os.Getenv("DATABASE_URL")
+	db, _ = sql.Open("postgres", conn)
 
-	connStr := os.Getenv("DATABASE_URL")
-	db, err = sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatal(err)
-	}
+	http.HandleFunc("/muscles", cors(getMuscles))
+	http.HandleFunc("/add-muscle", cors(addMuscle))
 
-	// ROUTES
-	http.HandleFunc("/muscle-groups", enableCORS(getMuscleGroups))
-	http.HandleFunc("/add-muscle", enableCORS(addMuscleGroup))
-	http.HandleFunc("/delete-muscle", enableCORS(deleteMuscleGroup))
+	http.HandleFunc("/exercises", cors(getExercises))
+	http.HandleFunc("/add-exercise", cors(addExercise))
 
-	http.HandleFunc("/exercises", enableCORS(getExercises))
-	http.HandleFunc("/add-exercise", enableCORS(addExercise))
-	http.HandleFunc("/delete-exercise", enableCORS(deleteExercise))
+	http.HandleFunc("/history", cors(getHistory))
+	http.HandleFunc("/add-workout", cors(addWorkout))
 
-	http.HandleFunc("/sets", enableCORS(getSets))
-	http.HandleFunc("/add-set", enableCORS(addSet))
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	log.Println("Server running on port", port)
-	http.ListenAndServe(":"+port, nil)
+	log.Println("Server running...")
+	http.ListenAndServe(":"+os.Getenv("PORT"), nil)
 }
