@@ -130,6 +130,39 @@ func addWorkout(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("saved"))
 }
 
+func deleteMuscle(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	db.Exec("DELETE FROM muscle_groups WHERE id=$1", id)
+
+	w.Write([]byte("deleted"))
+}
+
+func deleteExercise(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	db.Exec("DELETE FROM exercises WHERE id=$1", id)
+
+	w.Write([]byte("deleted"))
+}
+
+func deleteWorkout(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("log_id")
+
+	db.Exec("DELETE FROM exercise_logs WHERE id=$1", id)
+
+	w.Write([]byte("deleted"))
+}
+
+
+
+func deleteSet(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("set_id")
+
+	db.Exec("DELETE FROM sets WHERE id=$1", id)
+
+	w.Write([]byte("deleted"))
+}
 // ---------- HISTORY GROUPED BY DATE ----------
 func getHistory(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("exercise_id")
@@ -179,6 +212,10 @@ func main() {
 	http.HandleFunc("/update-exercise", middleware(updateExercise))
 	http.HandleFunc("/add-workout", middleware(addWorkout))
 	http.HandleFunc("/history", middleware(getHistory))
+	http.HandleFunc("/delete-muscle", middleware(deleteMuscle))
+	http.HandleFunc("/delete-exercise", middleware(deleteExercise))
+	http.HandleFunc("/delete-workout", middleware(deleteWorkout))
+	http.HandleFunc("/delete-set", middleware(deleteSet))
 
 	port := os.Getenv("PORT")
 	if port == "" {
