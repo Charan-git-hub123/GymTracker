@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Gym">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="icon" href="/icon-192.png">
+  <title>GymTracker</title>
+  <style>
+/* -------- tokens --------
+   Dark is the default: this is used in a gym. The light variant is a selected
+   set of steps, not an inverted flip. Chart colours are the validated
+   categorical slot 1 for each surface. */
+:root {
+  color-scheme: dark;
+  --surface-0:#111110; --surface-1:#1a1a19; --surface-2:#222221;
+  --line:#2f2f2d; --line-strong:#3d3d3a;
+  --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8b8a80;
+  --series-1:#3987e5; --good:#199e70; --danger:#e66767;
+  --grid:#262624;
+  --r-sm:8px; --r-md:12px; --r-lg:18px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+}
+@media (prefers-color-scheme: light) {
+  :root:where(:not([data-theme="dark"])) {
+    color-scheme: light;
+    --surface-0:#f7f7f5; --surface-1:#fcfcfb; --surface-2:#f0f0ed;
+    --line:#e2e1dd; --line-strong:#cfcec9;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#77766f;
+    --series-1:#2a70d6; --good:#1baf7a; --danger:#e34948;
+    --grid:#ebeae6;
+  }
+}
+/* Explicit choice wins over the OS, in both directions. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --surface-0:#f7f7f5; --surface-1:#fcfcfb; --surface-2:#f0f0ed;
+  --line:#e2e1dd; --line-strong:#cfcec9;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#77766f;
+  --series-1:#2a70d6; --good:#1baf7a; --danger:#e34948;
+  --grid:#ebeae6;
+}
+
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html,body { margin:0; padding:0; }
+html {
+  -webkit-text-size-adjust:100%;
+  overscroll-behavior-y:contain;    /* no pull-to-refresh mid-set */
+}
+* { -webkit-tap-highlight-color:transparent; }
+body {
+  background:var(--surface-0); color:var(--text-primary);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+h1,h2,h3 { margin:0; letter-spacing:-0.02em; font-weight:650; }
+h1 { font-size:19px; } h2 { font-size:17px; } h3 { font-size:15px; }
+button { font:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+input,select { font:inherit; }
+
+/* -------- chrome -------- */
+header {
+  position:sticky; top:0; z-index:20;
+  padding:calc(var(--sp-4) + env(safe-area-inset-top)) var(--sp-4) var(--sp-3);
+  background:color-mix(in oklab, var(--surface-0) 88%, transparent);
+  backdrop-filter:saturate(180%) blur(14px);
+  border-bottom:1px solid var(--line);
+}
+.header-inner {
+  display:flex; align-items:center; gap:var(--sp-3);
+  max-width:760px; margin:0 auto;
+}
+.brand { display:flex; align-items:baseline; gap:var(--sp-2); }
+.brand .dot { width:8px; height:8px; border-radius:50%; background:var(--series-1); }
+.spacer { flex:1; }
+main { padding:var(--sp-4); max-width:760px; margin:0 auto; }
+body, main { overflow-x:clip; }
+.section { margin-bottom:var(--sp-6); }
+.section-head { display:flex; align-items:center; gap:var(--sp-3); margin-bottom:var(--sp-3); }
+.eyebrow { color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.09em; font-weight:650; }
+
+/* -------- controls -------- */
+.btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  min-height:44px; padding:0 var(--sp-4); border-radius:var(--r-md);
+  background:var(--surface-2); color:var(--text-primary);
+  border:1px solid var(--line); font-weight:600;
+  transition:transform .06s ease, background .15s ease, border-color .15s ease;
+}
+.btn:active { transform:scale(.97); }
+.btn.primary { background:var(--series-1); border-color:transparent; color:#fff; }
+.btn.ghost { background:transparent; }
+.btn.sm { min-height:34px; padding:0 var(--sp-3); font-size:13px; border-radius:var(--r-sm); }
+.btn.danger { color:var(--danger); }
+.icon-btn { width:40px; height:40px; border-radius:var(--r-sm); display:grid; place-items:center; border:1px solid var(--line); background:var(--surface-2); color:inherit; }
+input[type=text], input[type=number], input[type=date] {
+  /* 16px is a hard floor, not a style choice: iOS Safari zooms the whole page
+     when you focus an input smaller than that, which would shift the layout
+     every time you tap a weight field.
+     min-width:0 is also essential - an input's intrinsic minimum width
+     otherwise refuses to shrink inside a grid or flex track. */
+  font-size:16px;
+  min-height:48px; width:100%; min-width:0; padding:0 var(--sp-3);
+  background:var(--surface-1); color:var(--text-primary);
+  border:1px solid var(--line); border-radius:var(--r-md); outline:none;
+}
+input:focus { border-color:var(--series-1); box-shadow:0 0 0 3px color-mix(in oklab, var(--series-1) 25%, transparent); }
+.row { display:flex; gap:var(--sp-2); align-items:center; }
+.row > * { min-width:0; }
+
+/* -------- chips -------- */
+.chips { display:flex; gap:var(--sp-2); overflow-x:auto; padding-bottom:var(--sp-2); scrollbar-width:none; }
+.chips::-webkit-scrollbar { display:none; }
+.chip {
+  flex:0 0 auto; min-height:38px; padding:0 var(--sp-4);
+  border-radius:999px; background:var(--surface-1); border:1px solid var(--line);
+  color:var(--text-secondary); font-weight:600; white-space:nowrap;
+  transition:transform .06s ease;
+}
+.chip:active { transform:scale(.96); }
+.chip[aria-selected="true"] { background:var(--series-1); border-color:transparent; color:#fff; }
+
+/* -------- cards -------- */
+.card {
+  background:var(--surface-1); border:1px solid var(--line);
+  border-radius:var(--r-lg); padding:var(--sp-4);
+}
+.list { display:flex; flex-direction:column; gap:var(--sp-2); }
+.item {
+  display:flex; align-items:center; gap:var(--sp-3);
+  background:var(--surface-1); border:1px solid var(--line);
+  border-radius:var(--r-md); padding:var(--sp-3) var(--sp-4);
+  text-align:left; width:100%;
+  transition:transform .06s ease, border-color .15s ease;
+}
+.item:active { transform:scale(.99); }
+.item:hover { border-color:var(--line-strong); }
+.item .grow { flex:1; min-width:0; }
+.item .name { font-weight:600; }
+.item .sub { color:var(--text-muted); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chevron { color:var(--text-muted); }
+
+/* -------- stat tiles -------- */
+.tiles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--sp-2); }
+.tile { background:var(--surface-1); border:1px solid var(--line); border-radius:var(--r-md); padding:var(--sp-3); min-width:0; }
+.tile .label { color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:650;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tile .value { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tile .value { font-size:22px; font-weight:680; letter-spacing:-0.03em; margin-top:2px; }
+.tile .unit { font-size:12px; color:var(--text-secondary); font-weight:600; }
+
+/* -------- sets editor -------- */
+.set-row { display:grid; grid-template-columns:22px minmax(0,1fr) minmax(0,1fr) 40px; gap:var(--sp-2); align-items:center; }
+.set-row .n { color:var(--text-muted); font-weight:650; text-align:center; }
+.field-label { color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:650; }
+
+/* -------- chart -------- */
+.chart-wrap { position:relative; }
+.chart-head { display:flex; align-items:center; gap:var(--sp-2); margin-bottom:var(--sp-3); flex-wrap:wrap; }
+.seg { display:inline-flex; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:2px; }
+.seg button { padding:6px var(--sp-3); border-radius:999px; font-size:13px; font-weight:600; color:var(--text-secondary); }
+.seg button[aria-pressed="true"] { background:var(--surface-1); color:var(--text-primary); box-shadow:0 1px 2px rgba(0,0,0,.2); }
+svg.chart { width:100%; display:block; touch-action:pan-y; }
+.grid-line { stroke:var(--grid); stroke-width:1; }
+.axis-text { fill:var(--text-muted); font-size:10px; }
+.series-line { fill:none; stroke:var(--series-1); stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.series-dot { fill:var(--series-1); stroke:var(--surface-1); stroke-width:2; }
+.crosshair { stroke:var(--line-strong); stroke-width:1; stroke-dasharray:3 3; }
+.point-label { fill:var(--text-primary); font-size:11px; font-weight:650; }
+.tip {
+  position:absolute; pointer-events:none; opacity:0; transform:translate(-50%,-120%);
+  background:var(--surface-2); border:1px solid var(--line-strong); border-radius:var(--r-sm);
+  padding:6px 10px; font-size:12px; white-space:nowrap; transition:opacity .1s ease;
+  box-shadow:0 6px 20px rgba(0,0,0,.35);
+}
+.tip .t-date { color:var(--text-muted); }
+.tip .t-val { font-weight:680; }
+table.data { width:100%; border-collapse:collapse; font-size:13px; }
+table.data th { text-align:left; color:var(--text-muted); font-weight:650; font-size:11px; text-transform:uppercase; letter-spacing:.08em; padding:6px 8px; border-bottom:1px solid var(--line); }
+table.data td { padding:7px 8px; border-bottom:1px solid var(--line); color:var(--text-secondary); }
+table.data td:first-child { color:var(--text-primary); }
+
+/* -------- misc -------- */
+.empty { text-align:center; color:var(--text-muted); padding:var(--sp-5) var(--sp-4); }
+.empty .big { font-size:15px; color:var(--text-secondary); font-weight:600; margin-bottom:4px; }
+.skeleton { height:52px; border-radius:var(--r-md); background:linear-gradient(90deg,var(--surface-1),var(--surface-2),var(--surface-1)); background-size:200% 100%; animation:sh 1.2s linear infinite; }
+@keyframes sh { to { background-position:-200% 0; } }
+#toast {
+  position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(20px);
+  background:var(--surface-2); border:1px solid var(--line-strong); color:var(--text-primary);
+  padding:var(--sp-3) var(--sp-4); border-radius:var(--r-md); font-size:14px; max-width:min(92vw,420px);
+  opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:60;
+  box-shadow:0 10px 30px rgba(0,0,0,.4);
+}
+#toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#toast.err { border-color:var(--danger); }
+.hidden { display:none !important; }
+/* Destructive controls are hidden until Edit is on, so a mistap in the gym
+   cannot delete a muscle group and cascade away its exercises and history. */
+.del { display:none; flex:0 0 auto; width:32px; height:32px; border-radius:var(--r-sm);
+  border:1px solid var(--line); background:var(--surface-2); color:var(--danger);
+  align-items:center; justify-content:center; font-size:16px; line-height:1; }
+body.editing .del { display:inline-flex; }
+body.editing .chevron { display:none; }
+.chip-wrap { position:relative; flex:0 0 auto; }
+body.editing .chip { padding-right:var(--sp-5); }
+.chip-del { display:none; position:absolute; top:-2px; right:-2px; width:20px; height:20px;
+  border-radius:50%; background:var(--danger); color:#fff; font-size:12px; line-height:20px;
+  text-align:center; font-weight:700; }
+body.editing .chip-del { display:block; }
+#editBtn[aria-pressed="true"] { background:var(--series-1); border-color:transparent; color:#fff; }
+.hist-day { border-left:2px solid var(--line-strong); padding-left:var(--sp-3); margin-bottom:var(--sp-4); }
+.hist-date { font-weight:650; margin-bottom:var(--sp-3); }
+.hist-set { display:flex; align-items:center; gap:var(--sp-2); color:var(--text-secondary); font-size:14px; padding:3px 0; }
+.hist-set .badge { min-width:36px; height:22px; border-radius:8px; background:var(--surface-2); color:var(--text-muted); font-size:11px; font-weight:650; display:grid; place-items:center; }
+.pr { color:var(--good); font-weight:650; font-size:12px; }
+  </style>
+</head>
+<body>
+  <header><div class="header-inner">
+    <div class="brand"><span class="dot"></span><h1>GymTracker</h1></div>
+    <div class="spacer"></div>
+    <button class="icon-btn" id="themeBtn" title="Switch light / dark">&#9788;</button>
+    <button class="btn sm ghost" id="editBtn" title="Show delete buttons" aria-pressed="false">Edit</button>
+    <button class="icon-btn" id="backBtn" title="Back" hidden>&#8592;</button>
+  </div></header>
+
+  <main>
+    <!-- =========== LIBRARY =========== -->
+    <div id="library">
+      <div class="section">
+        <div class="section-head"><span class="eyebrow">Muscle group</span><div class="spacer"></div>
+          <button class="btn sm ghost" id="addMuscleBtn">+ New</button></div>
+        <div class="chips" id="muscleChips"></div>
+        <div class="row hidden" id="addMuscleRow" style="margin-top:var(--sp-3)">
+          <input type="text" id="muscleName" placeholder="e.g. Chest" autocomplete="off" autocapitalize="words" spellcheck="false">
+          <button class="btn primary" id="saveMuscle">Add</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><span class="eyebrow">Exercises</span><div class="spacer"></div>
+          <button class="btn sm ghost" id="addExerciseBtn">+ New</button></div>
+        <div class="card hidden" id="addExerciseCard" style="margin-top:var(--sp-3)">
+          <div class="list">
+            <input type="text" id="exName" placeholder="Exercise name" autocomplete="off" autocapitalize="words" spellcheck="false">
+            <input type="text" id="exDesc" placeholder="Notes (optional)" autocomplete="off">
+            <input type="text" id="exLink" placeholder="YouTube link (optional)" autocomplete="off">
+            <div class="row"><button class="btn primary" id="saveExercise">Add exercise</button>
+              <button class="btn ghost" id="cancelExercise">Cancel</button></div>
+          </div>
+        </div>
+        <div id="exerciseList" class="list"></div>
+      </div>
+    </div>
+
+    <!-- =========== EXERCISE DETAIL =========== -->
+    <div id="detail" class="hidden">
+      <div class="section">
+        <h2 id="detailName"></h2>
+        <div class="sub" id="detailSub" style="color:var(--text-muted);font-size:13px;margin-top:2px"></div>
+        <a id="detailLink" class="btn sm ghost hidden" target="_blank" rel="noopener" style="margin-top:var(--sp-3)">Watch form video &rarr;</a>
+      </div>
+
+      <div class="section tiles" id="tiles"></div>
+
+      <div class="section">
+        <div class="section-head"><span class="eyebrow">Log a session</span></div>
+        <div class="card">
+          <div class="row" style="margin-bottom:var(--sp-3)">
+            <div style="flex:1"><div class="field-label">Date</div><input type="date" id="workoutDate"></div>
+          </div>
+          <div class="set-row" style="margin-bottom:var(--sp-1)">
+            <span></span><span class="field-label">Weight (kg)</span><span class="field-label">Reps</span><span></span>
+          </div>
+          <div class="list" id="setRows"></div>
+          <div class="row" style="margin-top:var(--sp-3)">
+            <button class="btn sm" id="addSetBtn">+ Add set</button>
+            <div class="spacer"></div>
+            <button class="btn primary" id="saveWorkout">Save session</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="eyebrow">Progress</span>
+          <div class="spacer"></div>
+          <div class="seg" id="metricSeg">
+            <button data-metric="top_weight" aria-pressed="true">Top set</button>
+            <button data-metric="volume" aria-pressed="false">Volume</button>
+          </div>
+          <button class="btn sm ghost" id="tableToggle">Table</button>
+        </div>
+        <div class="card">
+          <div class="chart-wrap" id="chartWrap"></div>
+          <div id="chartTable" class="hidden" style="margin-top:var(--sp-3)"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><span class="eyebrow">History</span></div>
+        <div id="historyList"></div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+'use strict';
+
+const $ = s => document.querySelector(s);
+const el = (t, cls, txt) => { const n = document.createElement(t); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+
+let state = { muscles: [], muscleId: null, exercises: [], exercise: null, progress: [], metric: 'top_weight' };
+
+/* -------- toast instead of alert -------- */
+let toastTimer;
+function toast(msg, isErr) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.toggle('err', !!isErr);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), isErr ? 5000 : 2200);
+}
+
+/* -------- api -------- */
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
+  const text = await res.text();
+  let body = null;
+  if (text) { try { body = JSON.parse(text); } catch (e) { body = { error: text.slice(0, 200) }; } }
+  if (!res.ok) throw new Error((body && body.error) || (res.status + ' ' + res.statusText));
+  return body;
+}
+
+/* niceStep picks a human step size (1/2/2.5/5 x a power of ten). */
+function niceStep(span, count) {
+  const raw = (span || 1) / Math.max(count, 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  const mult = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return mult * mag;
+}
+
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString();
+const shortDate = iso => { const d = new Date(iso + 'T00:00:00'); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+
+/* -------- library -------- */
+async function loadMuscles() {
+  const box = $('#muscleChips');
+  box.innerHTML = '';
+  try {
+    state.muscles = await api('/api/muscles');
+  } catch (e) { toast('Could not load muscle groups: ' + e.message, true); return; }
+
+  if (!state.muscles.length) {
+    box.appendChild(el('div', 'empty', 'No muscle groups yet - add one to start.'));
+    $('#exerciseList').innerHTML = '';
+    return;
+  }
+  if (state.muscleId == null || !state.muscles.some(m => m.id === state.muscleId)) {
+    state.muscleId = state.muscles[0].id;
+  }
+  renderChips();
+  loadExercises();
+}
+
+/* Separate from loadMuscles so selecting a chip re-paints without re-fetching
+   the list, which the first version did twice on every tap. */
+function renderChips() {
+  const box = $('#muscleChips');
+  box.innerHTML = '';
+  state.muscles.forEach(m => {
+    const wrap = el('div', 'chip-wrap');
+    const c = el('button', 'chip', m.name);
+    c.setAttribute('aria-selected', String(m.id === state.muscleId));
+    c.onclick = () => { state.muscleId = m.id; renderChips(); loadExercises(); };
+    wrap.appendChild(c);
+    const d = el('button', 'chip-del', '×');
+    d.title = 'Delete ' + m.name;
+    d.onclick = async ev => {
+      ev.stopPropagation();
+      if (!confirm('Delete "' + m.name + '"?\n\nThis also deletes its exercises and all their logged sessions.')) return;
+      try {
+        await api('/api/muscles/' + m.id, { method: 'DELETE' });
+        toast('Deleted ' + m.name);
+        if (state.muscleId === m.id) state.muscleId = null;
+        loadMuscles();
+      } catch (e) { toast('Could not delete: ' + e.message, true); }
+    };
+    wrap.appendChild(d);
+    box.appendChild(wrap);
+  });
+}
+
+async function loadExercises() {
+  const list = $('#exerciseList');
+  list.innerHTML = '';
+  const sk = el('div', 'skeleton'); list.appendChild(sk);
+  try {
+    state.exercises = await api('/api/exercises?muscle_id=' + state.muscleId);
+  } catch (e) { list.innerHTML = ''; toast('Could not load exercises: ' + e.message, true); return; }
+
+  list.innerHTML = '';
+  const deep = /^#ex=(\d+)$/.exec(location.hash);
+  if (deep) {
+    const want = state.exercises.find(x => x.id === Number(deep[1]));
+    if (want) { openExercise(want); return; }
+  }
+  if (!state.exercises.length) {
+    const e = el('div', 'empty');
+    e.appendChild(el('div', 'big', 'No exercises here yet'));
+    e.appendChild(el('div', null, 'Tap + New to add your first one.'));
+    list.appendChild(e);
+    return;
+  }
+  state.exercises.forEach(ex => {
+    const row = el('div', 'item');
+    const open = el('button', 'grow');
+    open.style.cssText = 'text-align:left;padding:0';
+    open.appendChild(el('div', 'name', ex.name));
+    if (ex.description) open.appendChild(el('div', 'sub', ex.description));
+    open.onclick = () => openExercise(ex);
+    row.appendChild(open);
+    row.appendChild(el('span', 'chevron', '›'));
+    const del = el('button', 'del', '×');
+    del.title = 'Delete ' + ex.name;
+    del.onclick = async () => {
+      if (!confirm('Delete "' + ex.name + '"?\n\nAll logged sessions for it are deleted too.')) return;
+      try { await api('/api/exercises/' + ex.id, { method: 'DELETE' }); toast('Deleted ' + ex.name); loadExercises(); }
+      catch (e) { toast('Could not delete: ' + e.message, true); }
+    };
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+/* -------- detail -------- */
+function openExercise(ex) {
+  state.exercise = ex;
+  if (location.hash !== '#ex=' + ex.id) history.replaceState(null, '', '#ex=' + ex.id);
+  $('#library').classList.add('hidden');
+  $('#detail').classList.remove('hidden');
+  $('#backBtn').hidden = false;
+  $('#detailName').textContent = ex.name;
+  $('#detailSub').textContent = ex.description || '';
+  const link = $('#detailLink');
+  if (ex.youtube_link) { link.href = ex.youtube_link; link.classList.remove('hidden'); }
+  else link.classList.add('hidden');
+  $('#workoutDate').value = new Date().toISOString().slice(0, 10);
+  resetSetRows();
+  loadProgress();
+  loadHistory();
+  window.scrollTo(0, 0);
+}
+
+$('#backBtn').onclick = () => {
+  history.replaceState(null, '', location.pathname);
+  $('#detail').classList.add('hidden');
+  $('#library').classList.remove('hidden');
+  $('#backBtn').hidden = true;
+  loadExercises();
+};
+
+/* -------- sets editor -------- */
+function setRow(n) {
+  const row = el('div', 'set-row');
+  row.appendChild(el('div', 'n', String(n)));
+  const w = el('input'); w.type = 'number'; w.step = '0.5'; w.min = '0'; w.placeholder = '0'; w.inputMode = 'decimal';
+  const r = el('input'); r.type = 'number'; r.step = '1'; r.min = '0'; r.placeholder = '0'; r.inputMode = 'numeric';
+  const del = el('button', 'icon-btn', '×'); del.title = 'Remove set';
+  del.onclick = () => { row.remove(); renumber(); };
+  row.appendChild(w); row.appendChild(r); row.appendChild(del);
+  return row;
+}
+function renumber() { [...$('#setRows').children].forEach((r, i) => { r.firstChild.textContent = String(i + 1); }); }
+function resetSetRows() { const b = $('#setRows'); b.innerHTML = ''; for (let i = 1; i <= 3; i++) b.appendChild(setRow(i)); }
+$('#addSetBtn').onclick = () => { const b = $('#setRows'); b.appendChild(setRow(b.children.length + 1)); };
+
+$('#saveWorkout').onclick = async () => {
+  const rows = [...$('#setRows').children];
+  const sets = [];
+  rows.forEach((r, i) => {
+    const [rIn, rIn_] = r.querySelectorAll('input');
+    const weight = parseFloat(rIn.value), reps = parseInt(rIn_.value, 10);
+    if (!isNaN(reps) && reps > 0) sets.push({ set_number: i + 1, weight: isNaN(weight) ? 0 : weight, reps });
+  });
+  if (!sets.length) { toast('Enter reps for at least one set', true); return; }
+
+  const btn = $('#saveWorkout'); btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    await api('/api/workouts', { method: 'POST', body: JSON.stringify({ exercise_id: state.exercise.id, date: $('#workoutDate').value, sets }) });
+    toast('Session saved - ' + sets.length + ' sets');
+    resetSetRows();
+    loadProgress(); loadHistory();
+  } catch (e) { toast('Could not save: ' + e.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Save session'; }
+};
+
+/* -------- history -------- */
+async function loadHistory() {
+  const box = $('#historyList');
+  box.innerHTML = '';
+  let logs;
+  try { logs = await api('/api/history?exercise_id=' + state.exercise.id); }
+  catch (e) { toast('Could not load history: ' + e.message, true); return; }
+
+  if (!logs.length) {
+    const e = el('div', 'empty');
+    e.appendChild(el('div', 'big', 'Nothing logged yet'));
+    e.appendChild(el('div', null, 'Your first session will show up here.'));
+    box.appendChild(e);
+    return;
+  }
+  const best = Math.max(...logs.flatMap(l => l.sets.map(s => s.weight)));
+  logs.forEach(l => {
+    const day = el('div', 'hist-day');
+    const head = el('div', 'row');
+    head.appendChild(el('div', 'hist-date', shortDate(l.date)));
+    head.appendChild(el('div', 'spacer'));
+    const del = el('button', 'btn sm ghost danger', 'Delete');
+    del.onclick = async () => {
+      if (!confirm('Delete this session and its sets?')) return;
+      try { await api('/api/workouts/' + l.log_id, { method: 'DELETE' }); toast('Session deleted'); loadProgress(); loadHistory(); }
+      catch (e) { toast('Could not delete: ' + e.message, true); }
+    };
+    head.appendChild(del);
+    day.appendChild(head);
+    l.sets.forEach(s => {
+      const line = el('div', 'hist-set');
+      line.appendChild(el('span', 'badge', String(s.set_number)));
+      line.appendChild(el('span', null, fmt(s.weight) + ' kg × ' + s.reps));
+      if (s.weight === best && best > 0) line.appendChild(el('span', 'pr', 'PR'));
+      line.appendChild(el('div', 'spacer'));
+      const del = el('button', 'del', '×');
+      del.title = 'Delete set ' + s.set_number;
+      del.onclick = async () => {
+        try { await api('/api/sets/' + s.set_id, { method: 'DELETE' }); toast('Set deleted'); loadProgress(); loadHistory(); }
+        catch (e) { toast('Could not delete: ' + e.message, true); }
+      };
+      line.appendChild(del);
+      day.appendChild(line);
+    });
+    box.appendChild(day);
+  });
+}
+
+/* -------- progress: tiles + chart -------- */
+async function loadProgress() {
+  try { state.progress = await api('/api/progress?exercise_id=' + state.exercise.id); }
+  catch (e) { toast('Could not load progress: ' + e.message, true); return; }
+  renderTiles();
+  renderChart();
+  renderChartTable();
+}
+
+function renderTiles() {
+  const p = state.progress, box = $('#tiles');
+  box.innerHTML = '';
+  const top = p.length ? Math.max(...p.map(x => x.top_weight)) : 0;
+  const lastVol = p.length ? p[p.length - 1].volume : 0;
+  const tile = (label, value, unit) => {
+    const t = el('div', 'tile');
+    t.appendChild(el('div', 'label', label));
+    const v = el('div', 'value', value);
+    if (unit) { const u = el('span', 'unit', ' ' + unit); v.appendChild(u); }
+    t.appendChild(v);
+    return t;
+  };
+  box.appendChild(tile('Best set', p.length ? fmt(top) : '-', p.length ? 'kg' : ''));
+  box.appendChild(tile('Sessions', String(p.length)));
+  box.appendChild(tile('Last vol', p.length ? fmt(lastVol) : '-', p.length ? 'kg' : ''));
+}
+
+/* A line chart: the job is change over time, one series, so no legend - the
+   heading names it. Crosshair + tooltip because an SVG chart is interactive.
+   With a single session there is no trend to draw, so it degrades to a
+   sentence rather than a one-point line. */
+function renderChart() {
+  const wrap = $('#chartWrap');
+  wrap.innerHTML = '';
+  const data = state.progress;
+  const key = state.metric;
+
+  if (!data.length) {
+    const e = el('div', 'empty');
+    e.appendChild(el('div', 'big', 'No progress yet'));
+    e.appendChild(el('div', null, 'Log two sessions and a trend appears here.'));
+    wrap.appendChild(e);
+    return;
+  }
+  if (data.length === 1) {
+    const d = data[0];
+    const e = el('div', 'empty');
+    e.appendChild(el('div', 'big', fmt(key === 'volume' ? d.volume : d.top_weight) + ' kg'));
+    e.appendChild(el('div', null, 'on ' + shortDate(d.date) + ' - one more session and this becomes a chart.'));
+    wrap.appendChild(e);
+    return;
+  }
+
+  const W = wrap.clientWidth || 320, H = 200;
+  const M = { t: 22, r: 30, b: 26, l: 42 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const vals = data.map(d => key === 'volume' ? d.volume : d.top_weight);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.15 || Math.max(hi * 0.1, 1);
+  /* Snap the scale to a round step so ticks read 50/55/60, not 50.25/56.75. */
+  const step = niceStep((hi + pad) - Math.max(0, lo - pad), 3);
+  const yMin = Math.max(0, Math.floor((lo - pad) / step) * step);
+  const yMax = Math.ceil((hi + pad) / step) * step;
+  const ticks = [];
+  for (let v = yMin; v <= yMax + 1e-9; v += step) ticks.push(Math.round(v * 100) / 100);
+  const x = i => M.l + (data.length === 1 ? iw / 2 : (i / (data.length - 1)) * iw);
+  const y = v => M.t + ih - ((v - yMin) / (yMax - yMin || 1)) * ih;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'chart');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', (key === 'volume' ? 'Volume' : 'Top set weight') + ' over ' + data.length + ' sessions');
+
+  const mk = (n, attrs) => { const e = document.createElementNS(NS, n); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+
+  // recessive horizontal grid + y labels on round values
+  ticks.forEach(v => {
+    const yy = y(v);
+    svg.appendChild(mk('line', { class: 'grid-line', x1: M.l, x2: W - M.r, y1: yy, y2: yy }));
+    const lab = mk('text', { class: 'axis-text', x: M.l - 6, y: yy + 3, 'text-anchor': 'end' });
+    lab.textContent = fmt(v);
+    svg.appendChild(lab);
+  });
+
+  // x labels: first, middle, last only - never a label on every point
+  [0, Math.floor((data.length - 1) / 2), data.length - 1].filter((v, i, a) => a.indexOf(v) === i).forEach(i => {
+    const lab = mk('text', { class: 'axis-text', x: x(i), y: H - 8, 'text-anchor': i === 0 ? 'start' : (i === data.length - 1 ? 'end' : 'middle') });
+    lab.textContent = shortDate(data[i].date);
+    svg.appendChild(lab);
+  });
+
+  svg.appendChild(mk('path', { class: 'series-line', d: vals.map((v, i) => (i ? 'L' : 'M') + x(i) + ' ' + y(v)).join(' ') }));
+
+  const cross = mk('line', { class: 'crosshair', y1: M.t, y2: M.t + ih, x1: -99, x2: -99 });
+  svg.appendChild(cross);
+  vals.forEach((v, i) => svg.appendChild(mk('circle', { class: 'series-dot', cx: x(i), cy: y(v), r: 4 })));
+
+  // one direct label, on the latest point
+  const lastLab = mk('text', { class: 'point-label', x: x(vals.length - 1), y: y(vals[vals.length - 1]) - 10, 'text-anchor': 'end' });
+  lastLab.textContent = fmt(vals[vals.length - 1]);
+  svg.appendChild(lastLab);
+
+  wrap.appendChild(svg);
+
+  const tip = el('div', 'tip');
+  wrap.appendChild(tip);
+  const hit = mk('rect', { x: 0, y: 0, width: W, height: H, fill: 'transparent' });
+  svg.appendChild(hit);
+
+  const move = ev => {
+    const box = svg.getBoundingClientRect();
+    const px = ((ev.touches ? ev.touches[0].clientX : ev.clientX) - box.left) * (W / box.width);
+    let idx = 0, bestD = Infinity;
+    for (let i = 0; i < data.length; i++) { const d = Math.abs(x(i) - px); if (d < bestD) { bestD = d; idx = i; } }
+    cross.setAttribute('x1', x(idx)); cross.setAttribute('x2', x(idx));
+    tip.innerHTML = '';
+    tip.appendChild(el('div', 't-date', shortDate(data[idx].date)));
+    tip.appendChild(el('div', 't-val', fmt(vals[idx]) + ' kg (' + (key === 'volume' ? 'volume' : 'top set') + ')'));
+    tip.appendChild(el('div', 't-date', data[idx].sets + ' sets'));
+    tip.style.left = (x(idx) / W * 100) + '%';
+    tip.style.top = (y(vals[idx]) / H * 100) + '%';
+    tip.style.opacity = '1';
+  };
+  const leave = () => { tip.style.opacity = '0'; cross.setAttribute('x1', -99); cross.setAttribute('x2', -99); };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerleave', leave);
+  svg.addEventListener('touchmove', move, { passive: true });
+  svg.addEventListener('touchend', leave);
+}
+
+/* A table view of the same numbers, so the chart is never the only way in. */
+function renderChartTable() {
+  const box = $('#chartTable');
+  box.innerHTML = '';
+  if (!state.progress.length) return;
+  const t = el('table', 'data');
+  const thead = el('thead'), hr = el('tr');
+  ['Date', 'Top set', 'Volume', 'Sets'].forEach(h => hr.appendChild(el('th', null, h)));
+  thead.appendChild(hr); t.appendChild(thead);
+  const tb = el('tbody');
+  [...state.progress].reverse().forEach(p => {
+    const tr = el('tr');
+    tr.appendChild(el('td', null, shortDate(p.date)));
+    tr.appendChild(el('td', null, fmt(p.top_weight) + ' kg'));
+    tr.appendChild(el('td', null, fmt(p.volume) + ' kg'));
+    tr.appendChild(el('td', null, String(p.sets)));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  box.appendChild(t);
+}
+
+$('#metricSeg').addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-metric]');
+  if (!b) return;
+  state.metric = b.dataset.metric;
+  [...$('#metricSeg').children].forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  renderChart();
+});
+$('#tableToggle').onclick = () => {
+  const tbl = $('#chartTable');
+  tbl.classList.toggle('hidden');
+  $('#tableToggle').textContent = tbl.classList.contains('hidden') ? 'Table' : 'Chart only';
+};
+
+/* -------- add forms -------- */
+$('#addMuscleBtn').onclick = () => { $('#addMuscleRow').classList.toggle('hidden'); $('#muscleName').focus(); };
+$('#saveMuscle').onclick = async () => {
+  const name = $('#muscleName').value.trim();
+  if (!name) { toast('Enter a name', true); return; }
+  try {
+    const m = await api('/api/muscles', { method: 'POST', body: JSON.stringify({ name }) });
+    $('#muscleName').value = ''; $('#addMuscleRow').classList.add('hidden');
+    state.muscleId = m.id; toast('Added ' + m.name);
+    await loadMuscles(); loadExercises();
+  } catch (e) { toast('Could not add: ' + e.message, true); }
+};
+$('#addExerciseBtn').onclick = () => { $('#addExerciseCard').classList.toggle('hidden'); $('#exName').focus(); };
+$('#cancelExercise').onclick = () => { $('#addExerciseCard').classList.add('hidden'); };
+$('#saveExercise').onclick = async () => {
+  const name = $('#exName').value.trim();
+  if (!name) { toast('Enter an exercise name', true); return; }
+  if (!state.muscleId) { toast('Pick a muscle group first', true); return; }
+  try {
+    await api('/api/exercises', { method: 'POST', body: JSON.stringify({
+      name, description: $('#exDesc').value.trim(), youtube_link: $('#exLink').value.trim(), muscle_group_id: state.muscleId }) });
+    $('#exName').value = ''; $('#exDesc').value = ''; $('#exLink').value = '';
+    $('#addExerciseCard').classList.add('hidden');
+    toast('Added ' + name);
+    loadExercises();
+  } catch (e) { toast('Could not add: ' + e.message, true); }
+};
+
+/* Theme: remembered, and an explicit choice beats the OS setting. */
+function applyTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  $('#themeBtn').innerHTML = (t === 'light') ? '&#9790;' : '&#9788;';
+}
+applyTheme(localStorage.getItem('gt-theme'));
+$('#themeBtn').onclick = () => {
+  const dark = getComputedStyle(document.documentElement).getPropertyValue('--surface-0').trim() === '#111110';
+  const next = dark ? 'light' : 'dark';
+  localStorage.setItem('gt-theme', next);
+  applyTheme(next);
+  if (state.exercise && !$('#detail').classList.contains('hidden')) renderChart();
+};
+
+$('#editBtn').onclick = () => {
+  const on = document.body.classList.toggle('editing');
+  const b = $('#editBtn');
+  b.setAttribute('aria-pressed', String(on));
+  // Label carries the state, not colour alone.
+  b.textContent = on ? 'Done' : 'Edit';
+  b.classList.toggle('primary', on);
+  b.classList.toggle('ghost', !on);
+};
+
+let resizeTimer;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.exercise && !$('#detail').classList.contains('hidden')) renderChart(); }, 150); });
+
+loadMuscles();
+  </script>
+</body>
+</html>
